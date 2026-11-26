@@ -2406,9 +2406,15 @@ class TestFormatProbeService:
     def test_confirm_manual_override(self, fresh_store):
         svc = SERVICES["format_probe"]
         svc.probe("FP-T3", "FI-20260902001", "DEADBEEF", "", 50)
-        ok, msg = svc.confirm_format("FP-T3", "csv-utf8", "t")
+        ok, msg, receipt = svc.confirm_format("FP-T3", "csv-utf8", "t", "reviewer-01")
         assert ok is True
         assert svc.resolved_format("FI-20260902001") == "csv-utf8"
+        # 人工确认必须产出可继续字段解析的改派回执
+        assert receipt is not None
+        assert receipt["回执编号"] == "RR-FP-T3"
+        assert receipt["魔数字节"] == "DEADBEEF"
+        assert receipt["判定版本"].startswith("MANUAL-")
+        assert receipt["正式批次记录编号"]
 
 
 class TestEncodingNormService:

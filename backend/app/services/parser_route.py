@@ -11,7 +11,10 @@ class ParserRouteService(BaseModuleService):
     MODULE = "parser_route"
     ENTITY = "路由决策"
     OPERATION_TERM = "调度"
-    LIST_FIELDS = ["决策编号", "关联批次", "推断格式", "命中解析器", "备选解析器", "路由依据", "回退次数", "决策时间"]
+    LIST_FIELDS = [
+        "决策编号", "关联批次", "推断格式", "命中解析器", "备选解析器", "路由依据",
+        "回退次数", "决策时间", "实际使用格式", "判定版本", "是否有效", "回执编号",
+    ]
     REQUIRED_FIELDS = ["决策编号", "关联批次", "推断格式"]
     STATUS_ORDER = ["待路由", "已选定", "已回退", "路由失败"]
     ACTION_RULES = {"选定解析器": "已选定", "执行回退": "已回退", "判定失败": "路由失败"}
@@ -33,6 +36,81 @@ class ParserRouteService(BaseModuleService):
             if row.get("决策编号") == decision_no:
                 return row
         return None
+
+    def reassign_route(
+        self, intake_batch: str, resolved_format: str, judgement_version: str,
+        receipt_no: str, decide_time: str,
+    ) -> tuple[bool, str, dict[str, Any]]:
+        """人工改派后重写解析路由，实际使用格式与判定版本写入路由决策。
+
+        同批次重复确认同一格式时幂等返回同一决策，不新增路由记录；
+        旧格式在途决策标记为失效，保证 CSV/XLSX 并发时只有一条有效路由。
+        """
+        rows = store.rows(self.MODULE)
+        # 先失效全部异格式在途决策，保证 CSV/XLSX 并发时只剩一条有效路由
+        for row in rows:
+            if row.get("关联批次") != intake_batch or row.get("是否有效") == "否":
+                continue
+            if str(row.get("实际使用格式") or row.get("推断格式")) == resolved_format \
+                    and row.get("判定版本") == judgement_version:
+                continue
+            row["是否有效"] = "否"
+            row["pending"] = False
+            row["abnormal"] = True
+            row["失效原因"] = (
+                f"格式人工改判为 {resolved_format}（{judgement_version}），"
+                f"旧 {row.get('推断格式')} 路由失效"
+            )
+
+        # 同格式同版本决策已存在：幂等返回，不新增路由记录
+        for row in rows:
+            if row.get("关联批次") != intake_batch or row.get("是否有效") == "否":
+                continue
+            if str(row.get("实际使用格式") or row.get("推断格式")) == resolved_format \
+                    and row.get("判定版本") == judgement_version:
+                return True, (
+                    f"批次 {intake_batch} 的 {resolved_format} 路由决策已存在，"
+                    "重复确认不另排作业"
+                ), dict(row)
+
+        chain = self.PARSER_CHAINS.get(resolved_format, [])
+        decision_no = f"PR-RT-{intake_batch}"
+        entry_id = max((int(r.get("id", 0)) for r in rows), default=0) + 1
+        entry = {
+            "id": entry_id,
+            "status": "已选定" if chain else "路由失败",
+            "pending": False,
+            "abnormal": not chain,
+            "决策编号": decision_no,
+            "关联批次": intake_batch,
+            "推断格式": resolved_format,
+            "实际使用格式": resolved_format,
+            "命中解析器": chain[0] if chain else "",
+            "备选解析器": ",".join(chain[1:]),
+            "路由依据": (
+                f"人工格式改派（判定版本 {judgement_version}），"
+                f"实际使用格式 {resolved_format}，回执 {receipt_no}"
+            ),
+            "回退次数": "0",
+            "决策时间": decide_time,
+            "判定版本": judgement_version,
+            "是否有效": "是",
+            "回执编号": receipt_no,
+        }
+        rows.append(entry)
+        if not chain:
+            return False, f"格式 {resolved_format} 无注册解析器链，改派路由失败", dict(entry)
+        return True, (
+            f"批次 {intake_batch} 已改派至 {resolved_format} 解析器 {chain[0]}"
+        ), dict(entry)
+
+    def effective_decision(self, intake_batch: str) -> dict[str, Any] | None:
+        """返回批次当前唯一有效的路由决策（供字段解析入口核对格式）。"""
+        candidates = [
+            r for r in store.rows(self.MODULE)
+            if r.get("关联批次") == intake_batch and r.get("是否有效") != "否"
+        ]
+        return dict(candidates[-1]) if candidates else None
 
     def choose_by_probe(self, decision_no: str, intake_batch: str,
                         probe_no: str, decide_time: str) -> tuple[bool, str, dict[str, Any] | None]:

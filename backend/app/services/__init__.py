@@ -4,6 +4,7 @@ from __future__ import annotations
 from app.services.base import BaseModuleService
 from app.services.file_intake import FileIntakeService
 from app.services.format_probe import FormatProbeService
+from app.services.probe_diagnosis import ProbeDiagnosisService
 from app.services.encoding_norm import EncodingNormService
 from app.services.parser_route import ParserRouteService
 from app.services.extract_tmpl import ExtractTmplService
@@ -28,6 +29,7 @@ from app.services.intake_audit import IntakeAuditService
 SERVICES: dict[str, BaseModuleService] = {
     "file_intake": FileIntakeService(),
     "format_probe": FormatProbeService(),
+    "probe_diagnosis": ProbeDiagnosisService(),
     "encoding_norm": EncodingNormService(),
     "parser_route": ParserRouteService(),
     "extract_tmpl": ExtractTmplService(),

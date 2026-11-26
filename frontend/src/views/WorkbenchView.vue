@@ -28,6 +28,8 @@
       </span>
     </p>
 
+    <FormatReassignConsole v-if="meta.key === 'format_probe'" @changed="reload" />
+
     <form class="filter-bar" @submit.prevent="reload">
       <label v-for="field in filterFields" :key="field" class="filter-item">
         <span>{{ field }}</span>
@@ -96,6 +98,7 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
 
+import FormatReassignConsole from './FormatReassignConsole.vue'
 import {
   createEntry,
   downloadEntries,
